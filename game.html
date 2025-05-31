@@ -8,7 +8,7 @@
         body {
             margin: 0;
             padding: 0;
-            background: #0a0a0a;
+            background: #000;
             font-family: 'Courier New', monospace;
             overflow: hidden;
             display: flex;
@@ -19,9 +19,9 @@
         
         #gameContainer {
             position: relative;
-            width: 800px;
-            height: 600px;
-            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            width: 1000px;
+            height: 700px;
+            background: #000;
             border: 3px solid #333;
             overflow: hidden;
         }
@@ -29,7 +29,7 @@
         #gameCanvas {
             width: 100%;
             height: 100%;
-            background: radial-gradient(circle at center, #0f0f23 0%, #000 70%);
+            background: #000;
         }
         
         #ui {
@@ -84,20 +84,36 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0.3; }
         }
+        
+        .stamina-bar {
+            width: 120px;
+            height: 8px;
+            background: #333;
+            border: 1px solid #666;
+            margin-top: 5px;
+        }
+        
+        .stamina-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00ff00, #ffff00, #ff4444);
+            transition: width 0.1s;
+        }
     </style>
 </head>
 <body>
     <div id="gameContainer">
-        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        <canvas id="gameCanvas" width="1000" height="700"></canvas>
         
         <div id="ui">
             <div>Health: <span id="health">100</span></div>
             <div>Distance to Exit: <span id="distance">---</span></div>
             <div>Hunter Alert: <span id="alert" class="pulse">ACTIVE</span></div>
+            <div>Stamina: <div class="stamina-bar"><div class="stamina-fill" id="staminaFill"></div></div></div>
+            <div style="margin-top: 5px; font-size: 10px;">Flashlight: <span id="flashlightStatus">OFF</span></div>
         </div>
         
         <div id="instructions">
-            WASD to move | Find the glowing EXIT | Avoid the red hunter | Collect health packs (green)
+            WASD to move | SHIFT to sprint | F for flashlight | Find the EXIT | Avoid the red hunter
         </div>
         
         <div id="gameOver">
@@ -117,56 +133,100 @@
         const ctx = canvas.getContext('2d');
         
         // Game state
-        let gameState = 'playing'; // 'playing', 'gameOver', 'victory'
+        let gameState = 'playing';
         let frameCount = 0;
         
         // Player object
         const player = {
-            x: 50,
-            y: 50,
-            size: 15,
-            speed: 3,
+            x: 80,
+            y: 80,
+            size: 12,
+            speed: 2.5,
+            sprintSpeed: 4.5,
             health: 100,
-            maxHealth: 100
+            maxHealth: 100,
+            stamina: 100,
+            maxStamina: 100,
+            isSprintKeyDown: false,
+            canSprint: true,
+            flashlightOn: false,
+            flashlightBattery: 100
         };
         
         // Hunter AI
         const hunter = {
-            x: 700,
-            y: 500,
-            size: 18,
-            speed: 1.8,
+            x: 850,
+            y: 550,
+            size: 15,
+            speed: 2.1,
             lastSeen: { x: player.x, y: player.y },
             searchMode: false,
-            searchTarget: { x: 400, y: 300 },
-            pathfindingCooldown: 0
+            searchTarget: { x: 500, y: 350 },
+            pathfindingCooldown: 0,
+            alertLevel: 0
         };
         
         // Exit point
         const exit = {
-            x: 750,
-            y: 50,
-            size: 25
+            x: 920,
+            y: 80,
+            size: 20
         };
         
-        // Obstacles for maze-like environment
+        // Complex maze obstacles
         const obstacles = [
-            { x: 150, y: 100, width: 20, height: 200 },
-            { x: 300, y: 0, width: 20, height: 150 },
-            { x: 300, y: 200, width: 20, height: 200 },
-            { x: 450, y: 150, width: 150, height: 20 },
-            { x: 500, y: 300, width: 20, height: 150 },
-            { x: 200, y: 350, width: 200, height: 20 },
-            { x: 600, y: 250, width: 20, height: 200 },
-            { x: 100, y: 450, width: 300, height: 20 },
-            { x: 650, y: 100, width: 20, height: 100 }
+            // Outer walls
+            { x: 0, y: 0, width: 1000, height: 20 },
+            { x: 0, y: 0, width: 20, height: 700 },
+            { x: 980, y: 0, width: 20, height: 700 },
+            { x: 0, y: 680, width: 1000, height: 20 },
+            
+            // Complex maze structure
+            { x: 100, y: 120, width: 20, height: 200 },
+            { x: 120, y: 300, width: 180, height: 20 },
+            { x: 200, y: 80, width: 20, height: 120 },
+            { x: 280, y: 50, width: 20, height: 150 },
+            { x: 300, y: 180, width: 100, height: 20 },
+            
+            { x: 450, y: 100, width: 20, height: 180 },
+            { x: 400, y: 260, width: 150, height: 20 },
+            { x: 530, y: 50, width: 20, height: 100 },
+            { x: 600, y: 120, width: 150, height: 20 },
+            { x: 730, y: 50, width: 20, height: 200 },
+            
+            { x: 80, y: 400, width: 120, height: 20 },
+            { x: 180, y: 420, width: 20, height: 120 },
+            { x: 250, y: 450, width: 100, height: 20 },
+            { x: 330, y: 380, width: 20, height: 150 },
+            { x: 400, y: 350, width: 150, height: 20 },
+            
+            { x: 500, y: 400, width: 20, height: 180 },
+            { x: 600, y: 450, width: 100, height: 20 },
+            { x: 680, y: 300, width: 20, height: 200 },
+            { x: 750, y: 380, width: 120, height: 20 },
+            { x: 820, y: 250, width: 20, height: 200 },
+            
+            // Additional maze complexity
+            { x: 150, y: 200, width: 80, height: 20 },
+            { x: 350, y: 150, width: 20, height: 80 },
+            { x: 480, y: 320, width: 80, height: 20 },
+            { x: 650, y: 200, width: 20, height: 80 },
+            { x: 780, y: 450, width: 80, height: 20 },
+            
+            // Central obstacles
+            { x: 400, y: 300, width: 60, height: 60 },
+            { x: 550, y: 250, width: 40, height: 40 },
+            { x: 300, y: 500, width: 50, height: 50 },
+            { x: 650, y: 500, width: 60, height: 40 }
         ];
         
         // Health packs
         const healthPacks = [
-            { x: 250, y: 250, size: 8, collected: false },
-            { x: 550, y: 450, size: 8, collected: false },
-            { x: 680, y: 350, size: 8, collected: false }
+            { x: 150, y: 180, size: 8, collected: false },
+            { x: 420, y: 420, size: 8, collected: false },
+            { x: 750, y: 180, size: 8, collected: false },
+            { x: 250, y: 550, size: 8, collected: false },
+            { x: 600, y: 350, size: 8, collected: false }
         ];
         
         // Input handling
@@ -174,6 +234,16 @@
         
         document.addEventListener('keydown', (e) => {
             keys[e.key.toLowerCase()] = true;
+            
+            if (e.key.toLowerCase() === 'f') {
+                player.flashlightOn = !player.flashlightOn;
+                updateFlashlightUI();
+            }
+            
+            if (e.key.toLowerCase() === 'shift') {
+                player.isSprintKeyDown = true;
+            }
+            
             if (e.key.toLowerCase() === 'r' && (gameState === 'gameOver' || gameState === 'victory')) {
                 restartGame();
             }
@@ -181,19 +251,32 @@
         
         document.addEventListener('keyup', (e) => {
             keys[e.key.toLowerCase()] = false;
+            
+            if (e.key.toLowerCase() === 'shift') {
+                player.isSprintKeyDown = false;
+            }
         });
+        
+        function updateFlashlightUI() {
+            document.getElementById('flashlightStatus').textContent = player.flashlightOn ? 'ON' : 'OFF';
+        }
         
         function restartGame() {
             gameState = 'playing';
-            player.x = 50;
-            player.y = 50;
+            player.x = 80;
+            player.y = 80;
             player.health = 100;
-            hunter.x = 700;
-            hunter.y = 500;
+            player.stamina = 100;
+            player.flashlightOn = false;
+            player.flashlightBattery = 100;
+            hunter.x = 850;
+            hunter.y = 550;
             hunter.searchMode = false;
+            hunter.alertLevel = 0;
             healthPacks.forEach(pack => pack.collected = false);
             document.getElementById('gameOver').style.display = 'none';
             document.getElementById('victory').style.display = 'none';
+            updateFlashlightUI();
         }
         
         function updatePlayer() {
@@ -202,10 +285,34 @@
             let newX = player.x;
             let newY = player.y;
             
-            if (keys['w'] || keys['arrowup']) newY -= player.speed;
-            if (keys['s'] || keys['arrowdown']) newY += player.speed;
-            if (keys['a'] || keys['arrowleft']) newX -= player.speed;
-            if (keys['d'] || keys['arrowright']) newX += player.speed;
+            // Sprint mechanics
+            let currentSpeed = player.speed;
+            const isSprinting = player.isSprintKeyDown && player.stamina > 0 && player.canSprint;
+            
+            if (isSprinting) {
+                currentSpeed = player.sprintSpeed;
+                player.stamina -= 2;
+                if (player.stamina <= 0) {
+                    player.stamina = 0;
+                    player.canSprint = false;
+                }
+            } else {
+                // Regenerate stamina when not sprinting
+                if (player.stamina < player.maxStamina) {
+                    player.stamina += 0.8;
+                }
+                if (player.stamina >= 30) {
+                    player.canSprint = true;
+                }
+            }
+            
+            player.stamina = Math.max(0, Math.min(player.maxStamina, player.stamina));
+            
+            // Movement
+            if (keys['w'] || keys['arrowup']) newY -= currentSpeed;
+            if (keys['s'] || keys['arrowdown']) newY += currentSpeed;
+            if (keys['a'] || keys['arrowleft']) newX -= currentSpeed;
+            if (keys['d'] || keys['arrowright']) newX += currentSpeed;
             
             // Boundary checking
             newX = Math.max(player.size, Math.min(canvas.width - player.size, newX));
@@ -227,6 +334,16 @@
                 player.x = newX;
                 player.y = newY;
             }
+            
+            // Flashlight battery drain
+            if (player.flashlightOn && player.flashlightBattery > 0) {
+                player.flashlightBattery -= 0.15;
+                if (player.flashlightBattery <= 0) {
+                    player.flashlightBattery = 0;
+                    player.flashlightOn = false;
+                    updateFlashlightUI();
+                }
+            }
         }
         
         function updateHunter() {
@@ -236,18 +353,28 @@
                 Math.pow(player.x - hunter.x, 2) + Math.pow(player.y - hunter.y, 2)
             );
             
-            // Line of sight check (simplified)
-            const hasLineOfSight = distToPlayer < 120;
+            // Enhanced AI based on flashlight and movement
+            let detectionRange = 100;
+            if (player.flashlightOn) detectionRange += 50;
+            
+            const hasLineOfSight = distToPlayer < detectionRange;
             
             if (hasLineOfSight) {
                 hunter.lastSeen.x = player.x;
                 hunter.lastSeen.y = player.y;
                 hunter.searchMode = false;
-            } else if (!hunter.searchMode && distToPlayer > 150) {
-                hunter.searchMode = true;
-                hunter.searchTarget.x = hunter.lastSeen.x + (Math.random() - 0.5) * 100;
-                hunter.searchTarget.y = hunter.lastSeen.y + (Math.random() - 0.5) * 100;
+                hunter.alertLevel = Math.min(100, hunter.alertLevel + 3);
+            } else {
+                hunter.alertLevel = Math.max(0, hunter.alertLevel - 1);
+                if (!hunter.searchMode && distToPlayer > 200) {
+                    hunter.searchMode = true;
+                    hunter.searchTarget.x = hunter.lastSeen.x + (Math.random() - 0.5) * 150;
+                    hunter.searchTarget.y = hunter.lastSeen.y + (Math.random() - 0.5) * 150;
+                }
             }
+            
+            // Dynamic speed based on alert level
+            let hunterSpeed = hunter.speed + (hunter.alertLevel / 100) * 0.8;
             
             // AI Movement
             let targetX, targetY;
@@ -255,8 +382,7 @@
                 targetX = hunter.searchTarget.x;
                 targetY = hunter.searchTarget.y;
                 
-                // Check if reached search target
-                if (Math.abs(hunter.x - targetX) < 20 && Math.abs(hunter.y - targetY) < 20) {
+                if (Math.abs(hunter.x - targetX) < 30 && Math.abs(hunter.y - targetY) < 30) {
                     hunter.searchTarget.x = Math.random() * canvas.width;
                     hunter.searchTarget.y = Math.random() * canvas.height;
                 }
@@ -265,16 +391,15 @@
                 targetY = hunter.lastSeen.y;
             }
             
-            // Simple pathfinding
+            // Pathfinding
             const dx = targetX - hunter.x;
             const dy = targetY - hunter.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
             
             if (dist > 5) {
-                let moveX = (dx / dist) * hunter.speed;
-                let moveY = (dy / dist) * hunter.speed;
+                let moveX = (dx / dist) * hunterSpeed;
+                let moveY = (dy / dist) * hunterSpeed;
                 
-                // Check collision with obstacles
                 let newX = hunter.x + moveX;
                 let newY = hunter.y + moveY;
                 
@@ -299,7 +424,6 @@
                 if (canMoveX) hunter.x = newX;
                 if (canMoveY) hunter.y = newY;
                 
-                // If stuck, try alternative path
                 if (!canMoveX && !canMoveY) {
                     hunter.searchMode = true;
                     hunter.searchTarget.x = Math.random() * canvas.width;
@@ -307,7 +431,6 @@
                 }
             }
             
-            // Boundary checking
             hunter.x = Math.max(hunter.size, Math.min(canvas.width - hunter.size, hunter.x));
             hunter.y = Math.max(hunter.size, Math.min(canvas.height - hunter.size, hunter.y));
         }
@@ -315,20 +438,18 @@
         function checkCollisions() {
             if (gameState !== 'playing') return;
             
-            // Hunter catches player
             const hunterDist = Math.sqrt(
                 Math.pow(player.x - hunter.x, 2) + Math.pow(player.y - hunter.y, 2)
             );
             
             if (hunterDist < player.size + hunter.size) {
-                player.health -= 2;
+                player.health -= 3;
                 if (player.health <= 0) {
                     gameState = 'gameOver';
                     document.getElementById('gameOver').style.display = 'block';
                 }
             }
             
-            // Player reaches exit
             const exitDist = Math.sqrt(
                 Math.pow(player.x - exit.x, 2) + Math.pow(player.y - exit.y, 2)
             );
@@ -338,7 +459,6 @@
                 document.getElementById('victory').style.display = 'block';
             }
             
-            // Health pack collection
             healthPacks.forEach(pack => {
                 if (!pack.collected) {
                     const packDist = Math.sqrt(
@@ -347,7 +467,7 @@
                     
                     if (packDist < player.size + pack.size) {
                         pack.collected = true;
-                        player.health = Math.min(player.maxHealth, player.health + 30);
+                        player.health = Math.min(player.maxHealth, player.health + 25);
                     }
                 }
             });
@@ -360,32 +480,54 @@
                 Math.pow(player.x - exit.x, 2) + Math.pow(player.y - exit.y, 2)
             );
             document.getElementById('distance').textContent = Math.floor(distToExit);
+            
+            const staminaPercent = player.stamina / player.maxStamina;
+            document.getElementById('staminaFill').style.width = (staminaPercent * 100) + '%';
+        }
+        
+        function isInFlashlightBeam(x, y) {
+            if (!player.flashlightOn || player.flashlightBattery <= 0) return false;
+            
+            const dist = Math.sqrt(Math.pow(x - player.x, 2) + Math.pow(y - player.y, 2));
+            return dist < 80; // Flashlight radius
         }
         
         function render() {
-            // Clear canvas with dark atmosphere
-            ctx.fillStyle = '#0a0a0a';
+            // Complete darkness
+            ctx.fillStyle = '#000';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
-            // Add atmospheric fog effect
-            const gradient = ctx.createRadialGradient(player.x, player.y, 0, player.x, player.y, 150);
-            gradient.addColorStop(0, 'rgba(20, 20, 40, 0.3)');
-            gradient.addColorStop(1, 'rgba(5, 5, 15, 0.8)');
-            ctx.fillStyle = gradient;
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            // Only render what's in the flashlight beam or very close to player
+            const lightRadius = player.flashlightOn && player.flashlightBattery > 0 ? 80 : 25;
             
-            // Draw obstacles
-            ctx.fillStyle = '#333';
-            ctx.strokeStyle = '#555';
+            // Create flashlight/visibility gradient
+            const gradient = ctx.createRadialGradient(player.x, player.y, 0, player.x, player.y, lightRadius);
+            gradient.addColorStop(0, 'rgba(40, 40, 60, 0.9)');
+            gradient.addColorStop(0.7, 'rgba(20, 20, 30, 0.7)');
+            gradient.addColorStop(1, 'rgba(0, 0, 0, 1)');
+            
+            // Apply visibility mask
+            ctx.save();
+            ctx.globalCompositeOperation = 'source-over';
+            
+            // Draw obstacles only if visible
+            ctx.fillStyle = '#444';
+            ctx.strokeStyle = '#666';
             ctx.lineWidth = 2;
             obstacles.forEach(obstacle => {
-                ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
-                ctx.strokeRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+                const centerX = obstacle.x + obstacle.width / 2;
+                const centerY = obstacle.y + obstacle.height / 2;
+                const dist = Math.sqrt(Math.pow(centerX - player.x, 2) + Math.pow(centerY - player.y, 2));
+                
+                if (dist < lightRadius + 50) {
+                    ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+                    ctx.strokeRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+                }
             });
             
-            // Draw health packs
+            // Draw health packs only if visible
             healthPacks.forEach(pack => {
-                if (!pack.collected) {
+                if (!pack.collected && isInFlashlightBeam(pack.x, pack.y)) {
                     ctx.fillStyle = '#00ff00';
                     ctx.shadowColor = '#00ff00';
                     ctx.shadowBlur = 10;
@@ -396,25 +538,26 @@
                 }
             });
             
-            // Draw exit
-            ctx.fillStyle = '#ffff00';
-            ctx.strokeStyle = '#ffaa00';
-            ctx.lineWidth = 3;
-            ctx.shadowColor = '#ffff00';
-            ctx.shadowBlur = 20;
-            ctx.beginPath();
-            ctx.arc(exit.x, exit.y, exit.size, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.stroke();
-            ctx.shadowBlur = 0;
+            // Draw exit only if visible
+            if (isInFlashlightBeam(exit.x, exit.y)) {
+                ctx.fillStyle = '#ffff00';
+                ctx.strokeStyle = '#ffaa00';
+                ctx.lineWidth = 3;
+                ctx.shadowColor = '#ffff00';
+                ctx.shadowBlur = 20;
+                ctx.beginPath();
+                ctx.arc(exit.x, exit.y, exit.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+                
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '12px Courier New';
+                ctx.textAlign = 'center';
+                ctx.fillText('EXIT', exit.x, exit.y - 30);
+            }
             
-            // Draw exit label
-            ctx.fillStyle = '#ffffff';
-            ctx.font = '12px Courier New';
-            ctx.textAlign = 'center';
-            ctx.fillText('EXIT', exit.x, exit.y - 35);
-            
-            // Draw player
+            // Draw player (always visible)
             ctx.fillStyle = '#4444ff';
             ctx.strokeStyle = '#6666ff';
             ctx.lineWidth = 2;
@@ -426,34 +569,43 @@
             ctx.stroke();
             ctx.shadowBlur = 0;
             
-            // Draw hunter
-            const hunterColor = hunter.searchMode ? '#ff6600' : '#ff0000';
-            ctx.fillStyle = hunterColor;
-            ctx.strokeStyle = '#ff4444';
-            ctx.lineWidth = 2;
-            ctx.shadowColor = hunterColor;
-            ctx.shadowBlur = 15;
-            ctx.beginPath();
-            ctx.arc(hunter.x, hunter.y, hunter.size, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.stroke();
-            ctx.shadowBlur = 0;
-            
-            // Draw hunter's vision cone when in direct pursuit
-            if (!hunter.searchMode) {
-                ctx.strokeStyle = 'rgba(255, 0, 0, 0.3)';
-                ctx.lineWidth = 1;
+            // Draw hunter only if visible
+            const hunterDist = Math.sqrt(Math.pow(hunter.x - player.x, 2) + Math.pow(hunter.y - player.y, 2));
+            if (hunterDist < lightRadius || hunterDist < 40) {
+                const hunterColor = hunter.searchMode ? '#ff6600' : '#ff0000';
+                ctx.fillStyle = hunterColor;
+                ctx.strokeStyle = '#ff4444';
+                ctx.lineWidth = 2;
+                ctx.shadowColor = hunterColor;
+                ctx.shadowBlur = 15;
                 ctx.beginPath();
-                ctx.moveTo(hunter.x, hunter.y);
-                ctx.lineTo(player.x, player.y);
+                ctx.arc(hunter.x, hunter.y, hunter.size, 0, Math.PI * 2);
+                ctx.fill();
                 ctx.stroke();
+                ctx.shadowBlur = 0;
+                
+                // Hunter's eyes glow
+                ctx.fillStyle = '#ff0000';
+                ctx.shadowColor = '#ff0000';
+                ctx.shadowBlur = 5;
+                ctx.beginPath();
+                ctx.arc(hunter.x - 5, hunter.y - 3, 2, 0, Math.PI * 2);
+                ctx.arc(hunter.x + 5, hunter.y - 3, 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
             }
             
+            // Apply darkness overlay
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.restore();
+            
             // Health bar
-            const barWidth = 100;
-            const barHeight = 8;
+            const barWidth = 80;
+            const barHeight = 6;
             const barX = player.x - barWidth / 2;
-            const barY = player.y - player.size - 15;
+            const barY = player.y - player.size - 12;
             
             ctx.fillStyle = '#333';
             ctx.fillRect(barX, barY, barWidth, barHeight);
@@ -480,6 +632,9 @@
             
             requestAnimationFrame(gameLoop);
         }
+        
+        // Initialize UI
+        updateFlashlightUI();
         
         // Start the game
         gameLoop();
