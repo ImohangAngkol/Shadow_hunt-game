@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shadow Hunt - Horror Escape Game</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #0a0a0a;
+            font-family: 'Courier New', monospace;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        
+        #gameContainer {
+            position: relative;
+            width: 800px;
+            height: 600px;
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            border: 3px solid #333;
+            overflow: hidden;
+        }
+        
+        #gameCanvas {
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at center, #0f0f23 0%, #000 70%);
+        }
+        
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #ff4444;
+            z-index: 100;
+            text-shadow: 0 0 10px #ff0000;
+        }
+        
+        #instructions {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: #666;
+            font-size: 12px;
+            z-index: 100;
+        }
+        
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ff0000;
+            font-size: 24px;
+            text-align: center;
+            z-index: 200;
+            text-shadow: 0 0 20px #ff0000;
+            display: none;
+        }
+        
+        #victory {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #00ff00;
+            font-size: 24px;
+            text-align: center;
+            z-index: 200;
+            text-shadow: 0 0 20px #00ff00;
+            display: none;
+        }
+        
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        
+        <div id="ui">
+            <div>Health: <span id="health">100</span></div>
+            <div>Distance to Exit: <span id="distance">---</span></div>
+            <div>Hunter Alert: <span id="alert" class="pulse">ACTIVE</span></div>
+        </div>
+        
+        <div id="instructions">
+            WASD to move | Find the glowing EXIT | Avoid the red hunter | Collect health packs (green)
+        </div>
+        
+        <div id="gameOver">
+            <div>YOU HAVE BEEN CAUGHT</div>
+            <div style="font-size: 16px; margin-top: 10px;">Press R to restart</div>
+        </div>
+        
+        <div id="victory">
+            <div>ESCAPED!</div>
+            <div style="font-size: 16px; margin-top: 10px;">You survived the hunt!</div>
+            <div style="font-size: 12px; margin-top: 5px;">Press R to play again</div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Game state
+        let gameState = 'playing'; // 'playing', 'gameOver', 'victory'
+        let frameCount = 0;
+        
+        // Player object
+        const player = {
+            x: 50,
+            y: 50,
+            size: 15,
+            speed: 3,
+            health: 100,
+            maxHealth: 100
+        };
+        
+        // Hunter AI
+        const hunter = {
+            x: 700,
+            y: 500,
+            size: 18,
+            speed: 1.8,
+            lastSeen: { x: player.x, y: player.y },
+            searchMode: false,
+            searchTarget: { x: 400, y: 300 },
+            pathfindingCooldown: 0
+        };
+        
+        // Exit point
+        const exit = {
+            x: 750,
+            y: 50,
+            size: 25
+        };
+        
+        // Obstacles for maze-like environment
+        const obstacles = [
+            { x: 150, y: 100, width: 20, height: 200 },
+            { x: 300, y: 0, width: 20, height: 150 },
+            { x: 300, y: 200, width: 20, height: 200 },
+            { x: 450, y: 150, width: 150, height: 20 },
+            { x: 500, y: 300, width: 20, height: 150 },
+            { x: 200, y: 350, width: 200, height: 20 },
+            { x: 600, y: 250, width: 20, height: 200 },
+            { x: 100, y: 450, width: 300, height: 20 },
+            { x: 650, y: 100, width: 20, height: 100 }
+        ];
+        
+        // Health packs
+        const healthPacks = [
+            { x: 250, y: 250, size: 8, collected: false },
+            { x: 550, y: 450, size: 8, collected: false },
+            { x: 680, y: 350, size: 8, collected: false }
+        ];
+        
+        // Input handling
+        const keys = {};
+        
+        document.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+            if (e.key.toLowerCase() === 'r' && (gameState === 'gameOver' || gameState === 'victory')) {
+                restartGame();
+            }
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+        
+        function restartGame() {
+            gameState = 'playing';
+            player.x = 50;
+            player.y = 50;
+            player.health = 100;
+            hunter.x = 700;
+            hunter.y = 500;
+            hunter.searchMode = false;
+            healthPacks.forEach(pack => pack.collected = false);
+            document.getElementById('gameOver').style.display = 'none';
+            document.getElementById('victory').style.display = 'none';
+        }
+        
+        function updatePlayer() {
+            if (gameState !== 'playing') return;
+            
+            let newX = player.x;
+            let newY = player.y;
+            
+            if (keys['w'] || keys['arrowup']) newY -= player.speed;
+            if (keys['s'] || keys['arrowdown']) newY += player.speed;
+            if (keys['a'] || keys['arrowleft']) newX -= player.speed;
+            if (keys['d'] || keys['arrowright']) newX += player.speed;
+            
+            // Boundary checking
+            newX = Math.max(player.size, Math.min(canvas.width - player.size, newX));
+            newY = Math.max(player.size, Math.min(canvas.height - player.size, newY));
+            
+            // Collision with obstacles
+            let canMove = true;
+            for (let obstacle of obstacles) {
+                if (newX + player.size > obstacle.x && 
+                    newX - player.size < obstacle.x + obstacle.width &&
+                    newY + player.size > obstacle.y && 
+                    newY - player.size < obstacle.y + obstacle.height) {
+                    canMove = false;
+                    break;
+                }
+            }
+            
+            if (canMove) {
+                player.x = newX;
+                player.y = newY;
+            }
+        }
+        
+        function updateHunter() {
+            if (gameState !== 'playing') return;
+            
+            const distToPlayer = Math.sqrt(
+                Math.pow(player.x - hunter.x, 2) + Math.pow(player.y - hunter.y, 2)
+            );
+            
+            // Line of sight check (simplified)
+            const hasLineOfSight = distToPlayer < 120;
+            
+            if (hasLineOfSight) {
+                hunter.lastSeen.x = player.x;
+                hunter.lastSeen.y = player.y;
+                hunter.searchMode = false;
+            } else if (!hunter.searchMode && distToPlayer > 150) {
+                hunter.searchMode = true;
+                hunter.searchTarget.x = hunter.lastSeen.x + (Math.random() - 0.5) * 100;
+                hunter.searchTarget.y = hunter.lastSeen.y + (Math.random() - 0.5) * 100;
+            }
+            
+            // AI Movement
+            let targetX, targetY;
+            if (hunter.searchMode) {
+                targetX = hunter.searchTarget.x;
+                targetY = hunter.searchTarget.y;
+                
+                // Check if reached search target
+                if (Math.abs(hunter.x - targetX) < 20 && Math.abs(hunter.y - targetY) < 20) {
+                    hunter.searchTarget.x = Math.random() * canvas.width;
+                    hunter.searchTarget.y = Math.random() * canvas.height;
+                }
+            } else {
+                targetX = hunter.lastSeen.x;
+                targetY = hunter.lastSeen.y;
+            }
+            
+            // Simple pathfinding
+            const dx = targetX - hunter.x;
+            const dy = targetY - hunter.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            
+            if (dist > 5) {
+                let moveX = (dx / dist) * hunter.speed;
+                let moveY = (dy / dist) * hunter.speed;
+                
+                // Check collision with obstacles
+                let newX = hunter.x + moveX;
+                let newY = hunter.y + moveY;
+                
+                let canMoveX = true, canMoveY = true;
+                
+                for (let obstacle of obstacles) {
+                    if (newX + hunter.size > obstacle.x && 
+                        newX - hunter.size < obstacle.x + obstacle.width &&
+                        hunter.y + hunter.size > obstacle.y && 
+                        hunter.y - hunter.size < obstacle.y + obstacle.height) {
+                        canMoveX = false;
+                    }
+                    
+                    if (hunter.x + hunter.size > obstacle.x && 
+                        hunter.x - hunter.size < obstacle.x + obstacle.width &&
+                        newY + hunter.size > obstacle.y && 
+                        newY - hunter.size < obstacle.y + obstacle.height) {
+                        canMoveY = false;
+                    }
+                }
+                
+                if (canMoveX) hunter.x = newX;
+                if (canMoveY) hunter.y = newY;
+                
+                // If stuck, try alternative path
+                if (!canMoveX && !canMoveY) {
+                    hunter.searchMode = true;
+                    hunter.searchTarget.x = Math.random() * canvas.width;
+                    hunter.searchTarget.y = Math.random() * canvas.height;
+                }
+            }
+            
+            // Boundary checking
+            hunter.x = Math.max(hunter.size, Math.min(canvas.width - hunter.size, hunter.x));
+            hunter.y = Math.max(hunter.size, Math.min(canvas.height - hunter.size, hunter.y));
+        }
+        
+        function checkCollisions() {
+            if (gameState !== 'playing') return;
+            
+            // Hunter catches player
+            const hunterDist = Math.sqrt(
+                Math.pow(player.x - hunter.x, 2) + Math.pow(player.y - hunter.y, 2)
+            );
+            
+            if (hunterDist < player.size + hunter.size) {
+                player.health -= 2;
+                if (player.health <= 0) {
+                    gameState = 'gameOver';
+                    document.getElementById('gameOver').style.display = 'block';
+                }
+            }
+            
+            // Player reaches exit
+            const exitDist = Math.sqrt(
+                Math.pow(player.x - exit.x, 2) + Math.pow(player.y - exit.y, 2)
+            );
+            
+            if (exitDist < player.size + exit.size) {
+                gameState = 'victory';
+                document.getElementById('victory').style.display = 'block';
+            }
+            
+            // Health pack collection
+            healthPacks.forEach(pack => {
+                if (!pack.collected) {
+                    const packDist = Math.sqrt(
+                        Math.pow(player.x - pack.x, 2) + Math.pow(player.y - pack.y, 2)
+                    );
+                    
+                    if (packDist < player.size + pack.size) {
+                        pack.collected = true;
+                        player.health = Math.min(player.maxHealth, player.health + 30);
+                    }
+                }
+            });
+        }
+        
+        function updateUI() {
+            document.getElementById('health').textContent = Math.max(0, player.health);
+            
+            const distToExit = Math.sqrt(
+                Math.pow(player.x - exit.x, 2) + Math.pow(player.y - exit.y, 2)
+            );
+            document.getElementById('distance').textContent = Math.floor(distToExit);
+        }
+        
+        function render() {
+            // Clear canvas with dark atmosphere
+            ctx.fillStyle = '#0a0a0a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Add atmospheric fog effect
+            const gradient = ctx.createRadialGradient(player.x, player.y, 0, player.x, player.y, 150);
+            gradient.addColorStop(0, 'rgba(20, 20, 40, 0.3)');
+            gradient.addColorStop(1, 'rgba(5, 5, 15, 0.8)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw obstacles
+            ctx.fillStyle = '#333';
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 2;
+            obstacles.forEach(obstacle => {
+                ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+                ctx.strokeRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+            });
+            
+            // Draw health packs
+            healthPacks.forEach(pack => {
+                if (!pack.collected) {
+                    ctx.fillStyle = '#00ff00';
+                    ctx.shadowColor = '#00ff00';
+                    ctx.shadowBlur = 10;
+                    ctx.beginPath();
+                    ctx.arc(pack.x, pack.y, pack.size, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.shadowBlur = 0;
+                }
+            });
+            
+            // Draw exit
+            ctx.fillStyle = '#ffff00';
+            ctx.strokeStyle = '#ffaa00';
+            ctx.lineWidth = 3;
+            ctx.shadowColor = '#ffff00';
+            ctx.shadowBlur = 20;
+            ctx.beginPath();
+            ctx.arc(exit.x, exit.y, exit.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            
+            // Draw exit label
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '12px Courier New';
+            ctx.textAlign = 'center';
+            ctx.fillText('EXIT', exit.x, exit.y - 35);
+            
+            // Draw player
+            ctx.fillStyle = '#4444ff';
+            ctx.strokeStyle = '#6666ff';
+            ctx.lineWidth = 2;
+            ctx.shadowColor = '#4444ff';
+            ctx.shadowBlur = 8;
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, player.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            
+            // Draw hunter
+            const hunterColor = hunter.searchMode ? '#ff6600' : '#ff0000';
+            ctx.fillStyle = hunterColor;
+            ctx.strokeStyle = '#ff4444';
+            ctx.lineWidth = 2;
+            ctx.shadowColor = hunterColor;
+            ctx.shadowBlur = 15;
+            ctx.beginPath();
+            ctx.arc(hunter.x, hunter.y, hunter.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            
+            // Draw hunter's vision cone when in direct pursuit
+            if (!hunter.searchMode) {
+                ctx.strokeStyle = 'rgba(255, 0, 0, 0.3)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(hunter.x, hunter.y);
+                ctx.lineTo(player.x, player.y);
+                ctx.stroke();
+            }
+            
+            // Health bar
+            const barWidth = 100;
+            const barHeight = 8;
+            const barX = player.x - barWidth / 2;
+            const barY = player.y - player.size - 15;
+            
+            ctx.fillStyle = '#333';
+            ctx.fillRect(barX, barY, barWidth, barHeight);
+            
+            const healthPercent = player.health / player.maxHealth;
+            const healthColor = healthPercent > 0.5 ? '#00ff00' : 
+                               healthPercent > 0.25 ? '#ffff00' : '#ff0000';
+            ctx.fillStyle = healthColor;
+            ctx.fillRect(barX, barY, barWidth * healthPercent, barHeight);
+            
+            ctx.strokeStyle = '#666';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(barX, barY, barWidth, barHeight);
+        }
+        
+        function gameLoop() {
+            frameCount++;
+            
+            updatePlayer();
+            updateHunter();
+            checkCollisions();
+            updateUI();
+            render();
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Start the game
+        gameLoop();
+    </script>
+</body>
+</html>
